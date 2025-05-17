@@ -4,8 +4,10 @@ import (
 	"flag"
 	"log"
 	"os"
+	"time"
 	"video-chat/api/handlers"
 
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -33,10 +35,10 @@ func Run() error {
 
 	app.Get("/", handlers.Welcome)
 	app.Get("/room/create", handlers.RoomCreate)
-	// app.Get("/room/:uuid", handlers.Room)
-	// app.Get("/room/:uuid/websocket", websocket.New(handlers.RoomWebsocket, websocket.Config{
-	// 	HandshakeTimeout: 10 * time.Second,
-	// }))
+	app.Get("/room/:uuid", handlers.Room)
+	app.Get("/room/:uuid/websocket", websocket.New(handlers.RoomWebsocket, websocket.Config{
+		HandshakeTimeout: 10 * time.Second,
+	}))
 	// app.Get("/room/:uuid/chat", handlers.RoomChat)
 	// app.Get("/room/:uuid/chat/websocket", websocket.New(handlers.RoomChatWebsocket))
 	// app.Get("/room/:uuid/viewer/websocket", websocket.New(handlers.RoomViewerWebsocket))
