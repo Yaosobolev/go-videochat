@@ -1,0 +1,58 @@
+package main
+
+import (
+	"flag"
+	"log"
+	"os"
+	"video-chat/api/handlers"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+)
+
+var (
+	addr = flag.String("addr", ":", os.Getenv("PORT"))
+	cert = flag.String("cert", "", "")
+	key  = flag.String("key", "", "")
+)
+
+func Run() error {
+	flag.Parse()
+
+	if *addr == ":" {
+		*addr = ":8080"
+	}
+
+	app := fiber.New(fiber.Config{
+		ServerHeader: "MyApp",
+	})
+
+	app.Use(logger.New())
+	app.Use(cors.New())
+
+	app.Get("/", handlers.Welcome)
+	app.Get("/room/create", handlers.RoomCreate)
+	// app.Get("/room/:uuid", handlers.Room)
+	// app.Get("/room/:uuid/websocket", websocket.New(handlers.RoomWebsocket, websocket.Config{
+	// 	HandshakeTimeout: 10 * time.Second,
+	// }))
+	// app.Get("/room/:uuid/chat", handlers.RoomChat)
+	// app.Get("/room/:uuid/chat/websocket", websocket.New(handlers.RoomChatWebsocket))
+	// app.Get("/room/:uuid/viewer/websocket", websocket.New(handlers.RoomViewerWebsocket))
+	// app.Get("/stream/:suuid", handlers.Stream)
+	// app.Get("/stream/:suuid/websocket", websocket.New(handlers.StreamWebsocket, websocket.Config{
+	// 	HandshakeTimeout: 10 * time.Second,
+	// }))
+	// app.Get("/stream/:suuid/chat/websocket", websocket.New(handlers.StreamChatWebsocket))
+	// app.Get("/stream/:suuid/viewer/websocket", websocket.New(handlers.StreamViewerWebsocket))
+
+	return app.Listen(*addr)
+}
+
+func main() {
+	if err := Run(); err != nil {
+		log.Fatalln(err.Error())
+	}
+
+}
