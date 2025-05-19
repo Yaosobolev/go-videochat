@@ -20,8 +20,9 @@ func Stream(c *fiber.Ctx) error {
 	if os.Getenv("ENVIRONMENT") == "PRODUCTION" {
 		ws = "wss"
 	}
+	w.RoomsLock.Lock()
 	if _, ok := w.Streams[suuid]; ok {
-		w.RoomsLock.Lock()
+		w.RoomsLock.Unlock()
 		return c.JSON(fiber.Map{
 			"StreamWebSocketAddr": fmt.Sprintf("%s://%s/stream/%s/websocket", ws, c.Hostname(), suuid),
 			"ChatWebSocketAddr":   fmt.Sprintf("%s://%s/stream/%s/chat/websocket", ws, c.Hostname(), suuid),
@@ -30,6 +31,7 @@ func Stream(c *fiber.Ctx) error {
 		})
 	}
 	w.RoomsLock.Unlock()
+
 	return c.JSON(fiber.Map{
 		"NoStream": true,
 		"Leave":    true,
@@ -42,6 +44,7 @@ func StreamWebSocket(c *websocket.Conn) {
 	if suuid == "" {
 		return
 	}
+
 	w.RoomsLock.Lock()
 	if stream, ok := w.Streams[suuid]; ok {
 		w.RoomsLock.Unlock()
@@ -56,6 +59,7 @@ func StreamViewerWebSocket(c *websocket.Conn) {
 	if suuid == "" {
 		return
 	}
+
 	w.RoomsLock.Lock()
 	if stream, ok := w.Streams[suuid]; ok {
 		w.RoomsLock.Unlock()
@@ -66,7 +70,7 @@ func StreamViewerWebSocket(c *websocket.Conn) {
 }
 
 func viewerConn(c *websocket.Conn, p *w.Peers) {
-	ticker := time.NewTicker(time.Second * 1)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	defer c.Close()
 

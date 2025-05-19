@@ -16,9 +16,14 @@ const (
 )
 
 var (
-	newLine = []byte{'\n'}
+	newline = []byte{'\n'}
 	space   = []byte{' '}
 )
+
+var upgrader = websocket.FastHTTPUpgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
 
 type Client struct {
 	Hub  *Hub
@@ -26,21 +31,14 @@ type Client struct {
 	Send chan []byte
 }
 
-var upgrader = websocket.FastHTTPUpgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
 func (c *Client) readPump() {
 	defer func() {
 		c.Hub.unregister <- c
 		c.Conn.Close()
 	}()
-
 	c.Conn.SetReadLimit(maxMessageSize)
 	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-
 	for {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
@@ -49,18 +47,17 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		message = bytes.TrimSpace(bytes.Replace(message, newLine, space, -1))
+		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
 		c.Hub.broadcast <- message
 	}
-
 }
+
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
 		c.Conn.Close()
 	}()
-
 	for {
 		select {
 		case message, ok := <-c.Send:
@@ -68,16 +65,16 @@ func (c *Client) writePump() {
 			if !ok {
 				return
 			}
+
 			w, err := c.Conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				return
 			}
-
 			w.Write(message)
-			n := len(c.Send)
 
+			n := len(c.Send)
 			for i := 0; i < n; i++ {
-				w.Write(newLine)
+				w.Write(newline)
 				w.Write(<-c.Send)
 			}
 
@@ -91,17 +88,12 @@ func (c *Client) writePump() {
 			}
 		}
 	}
-
 }
-func PeerChatConn(c *websocket.Conn, hub *Hub) {
-	client := &Client{
-		Hub:  hub,
-		Conn: c,
-		Send: make(chan []byte, 256),
-	}
 
+func PeerChatConn(c *websocket.Conn, hub *Hub) {
+	client := &Client{Hub: hub, Conn: c, Send: make(chan []byte, 256)}
 	client.Hub.register <- client
+
 	go client.writePump()
 	client.readPump()
-
 }

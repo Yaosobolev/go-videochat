@@ -15,7 +15,10 @@ import (
 )
 
 func RoomCreate(c *fiber.Ctx) error {
-	return c.Redirect(fmt.Sprintf("/room/%s", guuid.New().String()))
+	uuid := guuid.New().String()
+	return c.JSON(fiber.Map{
+		"uuid": uuid,
+	})
 }
 
 func Room(c *fiber.Ctx) error {
@@ -48,14 +51,15 @@ func RoomWebSocket(c *websocket.Conn) {
 	if uuid == "" {
 		return
 	}
+
 	_, _, room := createOrGetRoom(uuid)
 	w.RoomConn(c, room.Peers)
-
 }
 
 func createOrGetRoom(uuid string) (string, string, *w.Room) {
 	w.RoomsLock.Lock()
 	defer w.RoomsLock.Unlock()
+
 	h := sha256.New()
 	h.Write([]byte(uuid))
 	suuid := fmt.Sprintf("%x", h.Sum(nil))
@@ -74,8 +78,11 @@ func createOrGetRoom(uuid string) (string, string, *w.Room) {
 		Peers: p,
 		Hub:   hub,
 	}
+
 	w.Rooms[uuid] = room
 	w.Streams[suuid] = room
+
+	go hub.Run()
 	return uuid, suuid, room
 }
 
@@ -95,7 +102,7 @@ func RoomViewerWebSocket(c *websocket.Conn) {
 }
 
 func roomViewerConn(c *websocket.Conn, p *w.Peers) {
-	ticker := time.NewTicker(time.Second * 1)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	defer c.Close()
 
