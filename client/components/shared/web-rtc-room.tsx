@@ -1,202 +1,121 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
 
-import React, { useEffect, useRef, useState } from "react";
-interface Props {
-  className?: string;
+type Props = {
   wsUrl: string;
-}
-
-interface PeerConnections {
-  [id: string]: RTCPeerConnection;
-}
-
-interface RemoteStreams {
-  [id: string]: MediaStream;
-}
-
-const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+};
 
 export const WebRTCRoom: React.FC<Props> = ({ wsUrl }) => {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const [remoteStreams, setRemoteStreams] = useState<RemoteStreams>({});
-  const peerConnections = useRef<PeerConnections>({});
-  const ws = useRef<WebSocket | null>(null);
-  const localStream = useRef<MediaStream | null>(null);
-  const clientId = useRef<string>("");
+  const socketRef = useRef<WebSocket | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
 
   useEffect(() => {
-    if (!wsUrl) return;
+    const init = async () => {
+      // 1. Создаём WebSocket
+      socketRef.current = new WebSocket(wsUrl);
 
-    ws.current = new WebSocket(wsUrl);
+      // 2. Создаём PeerConnection
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      peerConnectionRef.current = pc;
 
-    ws.current.onopen = () => {
-      console.log("WebSocket connected");
-    };
+      // 3. Получаем локальную камеру и микрофон
+      const localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localStreamRef.current = localStream;
 
-    ws.current.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-      const { from, type, sdp, candidate } = data;
-
-      // Игнорируем сообщения от себя
-      if (from === clientId.current) return;
-
-      if (type === "welcome") {
-        clientId.current = data.id;
-        console.log("Assigned client ID:", clientId.current);
-        return;
+      // 4. Привязываем видео к элементу
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
       }
 
-      // Обработка сигналов WebRTC
-      if (type === "offer") {
-        await handleOffer(from, sdp);
-      } else if (type === "answer") {
-        await handleAnswer(from, sdp);
-      } else if (type === "candidate") {
-        await handleCandidate(from, candidate);
-      } else if (type === "new-peer") {
-        // Создаем пира и отправляем offer новому участнику
-        await createPeerConnection(from, true);
-      }
-    };
-
-    ws.current.onclose = () => {
-      console.log("WebSocket closed");
-      // Очистить соединения
-      Object.values(peerConnections.current).forEach((pc) => pc.close());
-      peerConnections.current = {};
-      setRemoteStreams({});
-    };
-
-    // Получаем локальный медиапоток (камера+микрофон)
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        localStream.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
+      // 5. Добавляем треки в peer connection
+      localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, localStream);
       });
 
+      // 6. Обрабатываем входящие сообщения
+      socketRef.current.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.event === "offer") {
+          const offer = JSON.parse(msg.data);
+          await pc.setRemoteDescription(offer);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socketRef.current?.send(
+            JSON.stringify({ event: "answer", data: JSON.stringify(answer) })
+          );
+        } else if (msg.event === "candidate") {
+          const candidate = JSON.parse(msg.data);
+          await pc.addIceCandidate(candidate);
+        }
+      };
+
+      // 7. ICE кандидаты
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socketRef.current?.send(
+            JSON.stringify({
+              event: "candidate",
+              data: JSON.stringify(event.candidate),
+            })
+          );
+        }
+      };
+
+      // 8. Когда приходит удалённый поток
+      pc.ontrack = (event) => {
+        const incomingStream = event.streams[0];
+        setRemoteStreams((prev) => {
+          if (!prev.find((s) => s.id === incomingStream.id)) {
+            return [...prev, incomingStream];
+          }
+          return prev;
+        });
+      };
+    };
+
+    init();
+
     return () => {
-      ws.current?.close();
-      localStream.current?.getTracks().forEach((track) => track.stop());
-      Object.values(peerConnections.current).forEach((pc) => pc.close());
-      peerConnections.current = {};
-      setRemoteStreams({});
+      peerConnectionRef.current?.close();
+      socketRef.current?.close();
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, [wsUrl]);
 
-  // Создание RTCPeerConnection
-  async function createPeerConnection(peerId: string, isOfferer: boolean) {
-    if (peerConnections.current[peerId]) return;
-
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-
-    // Добавляем локальный поток в пира
-    if (localStream.current) {
-      localStream.current
-        .getTracks()
-        .forEach((track) => pc.addTrack(track, localStream.current!));
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        ws.current?.send(
-          JSON.stringify({
-            type: "candidate",
-            to: peerId,
-            candidate: event.candidate,
-            from: clientId.current,
-          })
-        );
-      }
-    };
-
-    pc.ontrack = (event) => {
-      setRemoteStreams((prev) => {
-        return { ...prev, [peerId]: event.streams[0] };
-      });
-    };
-
-    peerConnections.current[peerId] = pc;
-
-    if (isOfferer) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.current?.send(
-        JSON.stringify({
-          type: "offer",
-          to: peerId,
-          sdp: offer,
-          from: clientId.current,
-        })
-      );
-    }
-
-    return pc;
-  }
-
-  async function handleOffer(from: string, sdp: RTCSessionDescriptionInit) {
-    const pc = await createPeerConnection(from, false);
-    if (!pc) return;
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    ws.current?.send(
-      JSON.stringify({
-        type: "answer",
-        to: from,
-        sdp: answer,
-        from: clientId.current,
-      })
-    );
-  }
-
-  async function handleAnswer(from: string, sdp: RTCSessionDescriptionInit) {
-    const pc = peerConnections.current[from];
-    if (!pc) return;
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-  }
-
-  async function handleCandidate(from: string, candidate: RTCIceCandidateInit) {
-    const pc = peerConnections.current[from];
-    if (!pc) return;
-    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-  }
-
   return (
-    <div className="flex flex-col items-center space-y-4 p-4">
+    <div>
       <div>
-        <h2 className="text-lg font-semibold">Your video</h2>
-        <video
-          ref={localVideoRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-64 h-48 bg-black rounded"
-        />
+        <h3>Local Camera</h3>
+        <video ref={localVideoRef} autoPlay playsInline muted />
+        {/* <button onClick={startCamera}>Start Camera</button> */}
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold mb-2">Remote videos</h2>
-        <div className="flex flex-wrap gap-4">
-          {Object.entries(remoteStreams).map(([peerId, stream]) => (
-            <video
-              key={peerId}
-              autoPlay
-              playsInline
-              className="w-64 h-48 bg-black rounded"
-              ref={(video) => {
-                if (video && video.srcObject !== stream) {
-                  video.srcObject = stream;
-                }
-              }}
-            />
+        <h3>Remote Streams</h3>
+        {remoteStreams
+          .filter((stream) => stream.active)
+          .map((stream, idx) => (
+            <div className="" key={stream.id}>
+              <h4>Remote Stream {idx + 1}</h4>
+              <p>Stream ID: {stream.id}</p>
+              <video
+                autoPlay
+                playsInline
+                ref={(video) => {
+                  if (video && stream.active) video.srcObject = stream;
+                }}
+              />
+            </div>
           ))}
-          {Object.keys(remoteStreams).length === 0 && (
-            <p>No other participants yet</p>
-          )}
-        </div>
       </div>
     </div>
   );

@@ -78,6 +78,7 @@ func StreamConn(c *websocket.Conn, p *Peers) {
 	message := &websocketMessage{}
 	for {
 		_, raw, err := c.ReadMessage()
+		log.Println("Raw WebSocket message:", string(raw))
 		if err != nil {
 			log.Println(err)
 			return

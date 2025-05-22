@@ -37,14 +37,10 @@ func RoomConn(c *websocket.Conn, p *Peers) {
 			Conn:  c,
 			Mutex: sync.Mutex{},
 		}}
-
 	// Add our new PeerConnection to global list
 	p.ListLock.Lock()
 	p.Connections = append(p.Connections, newPeer)
 	p.ListLock.Unlock()
-
-	log.Println(p.Connections)
-
 	// Trickle ICE. Emit server candidate to client
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		if i == nil {
@@ -78,6 +74,7 @@ func RoomConn(c *websocket.Conn, p *Peers) {
 	})
 
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		log.Printf("Track %s received from peer %s\n", t.ID(), t.StreamID())
 		// Create a track to fan out our incoming video to all peers
 		trackLocal := p.AddTrack(t)
 		if trackLocal == nil {
@@ -102,6 +99,7 @@ func RoomConn(c *websocket.Conn, p *Peers) {
 	message := &websocketMessage{}
 	for {
 		_, raw, err := c.ReadMessage()
+		log.Println("message RoomConn", string(raw))
 		if err != nil {
 			log.Println(err)
 			return
